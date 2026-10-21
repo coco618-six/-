@@ -1,0 +1,173 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>薄桜鬼 攻略ノート</title>
+<style>
+body{font-family:-apple-system,sans-serif;margin:0;background:#f6f3f1;color:#302b2b}
+header{background:#29282d;color:white;padding:20px}
+main{padding:14px;max-width:700px;margin:auto}
+h1{font-size:23px;margin:0}h2{font-size:19px}
+.panel,.node,.choice{background:white;border:1px solid #ddd6d2;border-radius:12px;padding:14px;margin:12px 0}
+button,select,input,textarea{font:inherit;box-sizing:border-box;max-width:100%;border-radius:8px;padding:10px;border:1px solid #c9c0bc}
+input,textarea,select{width:100%;margin:5px 0 10px}
+button{background:#39343a;color:white;border:0;margin:4px 3px 4px 0}
+button.secondary{background:#eee8e5;color:#302b2b}
+label{font-size:14px;font-weight:600}
+.small{font-size:13px;color:#716968}
+.hidden{display:none}
+.choice{background:#faf8f7}
+hr{border:0;border-top:1px solid #eee;margin:16px 0}
+</style>
+</head>
+<body>
+<header><h1>薄桜鬼 攻略ノート</h1><div class="small" style="color:#ddd">自分だけの分岐・ルート記録</div></header>
+<main>
+<div class="panel">
+<h2>① キャラクター設定</h2>
+<label>攻略したいキャラクター名（1行に1人）</label>
+<textarea id="chars" rows="4" placeholder="キャラクター名を入力"></textarea>
+<button onclick="saveChars()">キャラクターを保存</button>
+<div class="small">名前は自由に追加・変更できるよ。</div>
+</div>
+
+<div class="panel">
+<h2>② 分岐を記録</h2>
+<label>この分岐の質問・場面</label>
+<input id="question" placeholder="例：誰についていく？">
+<button onclick="addNode()">分岐を新規作成</button>
+<div class="small">最初の分岐から順番に登録してね。</div>
+</div>
+
+<div class="panel">
+<h2>③ キャラクター別ルート検索</h2>
+<label>探したいキャラクター</label>
+<select id="target"></select>
+<label><input type="checkbox" id="uncertain" style="width:auto"> 未確認の結果も含める</label>
+<button onclick="searchRoute()">ルートを検索</button>
+<div id="results"></div>
+</div>
+
+<div id="nodes"></div>
+
+<div class="panel">
+<h2>④ バックアップ</h2>
+<button onclick="exportData()">記録を書き出す</button>
+<label>バックアップから復元</label>
+<input type="file" id="file" accept=".json,application/json">
+<button onclick="importData()" class="secondary">記録を読み込む</button>
+<div class="small">機種変更やブラウザのデータ消失に備えて、時々バックアップしてね。</div>
+</div>
+</main>
+<script>
+const KEY="hakuokiGuideV1";
+let data={chars:[],nodes:[],nextId:1};
+try{const saved=localStorage.getItem(KEY);if(saved)data=JSON.parse(saved)}catch(e){}
+function persist(){localStorage.setItem(KEY,JSON.stringify(data));render()}
+function saveChars(){
+ data.chars=document.getElementById("chars").value.split("\n").map(s=>s.trim()).filter(Boolean);
+ persist();
+}
+function addNode(parentChoice=null){
+ const q=parentChoice===null?document.getElementById("question").value.trim():prompt("次の分岐の場面・質問は？");
+ if(!q){alert("場面や質問を入力してね");return}
+ const n={id:data.nextId++,question:q,parentChoice,choices:[]};
+ data.nodes.push(n);document.getElementById("question").value="";persist();
+}
+function addChoice(id){
+ const n=data.nodes.find(x=>x.id===id);
+ n.choices.push({text:"",butterfly:"未確認",outcome:"未確認",character:"",note:"",child:null});
+ persist();
+}
+function update(id,i,key,value){
+ const n=data.nodes.find(x=>x.id===id);n.choices[i][key]=value;localStorage.setItem(KEY,JSON.stringify(data));
+}
+function saveAll(){persist()}
+function removeNode(id){
+ if(!confirm("この分岐と、その下につながる分岐を削除する？"))return;
+ const remove=new Set([id]);let changed=true;
+ while(changed){changed=false;data.nodes.forEach(n=>{if(n.parentChoice&&data.nodes.some(p=>p.choices.some(c=>c===n.parentChoice))){} });}
+ function descendants(nodeId){
+  const n=data.nodes.find(x=>x.id===nodeId);if(!n)return;
+  n.choices.forEach(c=>{if(c.child!==null)descendants(c.child)});
+  data.nodes=data.nodes.filter(x=>x.id!==nodeId);
+ }
+ descendants(id);persist();
+}
+function removeChoice(id,i){
+ const n=data.nodes.find(x=>x.id===id),c=n.choices[i];
+ if(c.child!==null){if(!confirm("下の分岐も削除する？"))return;removeNode(c.child)}
+ n.choices.splice(i,1);persist();
+}
+function render(){
+ document.getElementById("chars").value=data.chars.join("\n");
+ const target=document.getElementById("target"),old=target.value;
+ target.innerHTML='<option value="">選択してね</option>'+data.chars.map(c=>'<option>'+esc(c)+'</option>').join("");
+ if(data.chars.includes(old))target.value=old;
+ const rootNodes=data.nodes.filter(n=>n.parentChoice===null);
+ document.getElementById("nodes").innerHTML='<h2>登録した分岐</h2>'+
+ (rootNodes.length?rootNodes.map(n=>nodeHTML(n)).join(""):'<p class="small">まだ分岐はありません。上から作成してね。</p>');
+}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function nodeHTML(n){
+ return '<div class="node"><h2>'+esc(n.question)+'</h2>'+
+ '<button onclick="addChoice('+n.id+')">＋ 選択肢を追加</button> '+
+ '<button class="secondary" onclick="removeNode('+n.id+')">分岐を削除</button>'+
+ n.choices.map((c,i)=>choiceHTML(n,c,i)).join("")+'</div>';
+}
+function choiceHTML(n,c,i){
+ const charOptions='<option value="">選択してね</option>'+data.chars.map(x=>'<option '+(c.character===x?'selected':'')+'>'+esc(x)+'</option>').join("");
+ return '<div class="choice"><label>選択肢 '+(i+1)+'</label>'+
+ '<input placeholder="選択肢の内容" value="'+esc(c.text)+'" onchange="update('+n.id+','+i+',\'text\',this.value)">'+
+ '<label>蝶の演出</label><select onchange="update('+n.id+','+i+',\'butterfly\',this.value)">'+
+ ['未確認','出た','出なかった'].map(x=>'<option '+(c.butterfly===x?'selected':'')+'>'+x+'</option>').join("")+'</select>'+
+ '<label>この選択肢の結果</label><select onchange="update('+n.id+','+i+',\'outcome\',this.value)">'+
+ ['未確認','キャラクタールート','ルートに入らない'].map(x=>'<option '+(c.outcome===x?'selected':'')+'>'+x+'</option>').join("")+'</select>'+
+ '<label>ルートのキャラクター（分かる場合）</label><select onchange="update('+n.id+','+i+',\'character\',this.value)">'+charOptions+'</select>'+
+ '<label>イベント・気づいたこと</label><textarea rows="2" placeholder="自由メモ" onchange="update('+n.id+','+i+',\'note\',this.value)">'+esc(c.note)+'</textarea>'+
+ (c.child===null?'<button onclick="makeChild('+n.id+','+i+')">この選択肢の先に分岐を作る</button>':'<button class="secondary" onclick="jumpTo('+c.child+')">下の分岐へ ↓</button>')+
+ '<button class="secondary" onclick="removeChoice('+n.id+','+i+')">選択肢を削除</button></div>';
+}
+function makeChild(id,i){
+ const n=data.nodes.find(x=>x.id===id),c=n.choices[i];
+ const q=prompt("次に出てくる場面・質問は？");if(!q||!q.trim())return;
+ const child={id:data.nextId++,question:q.trim(),parentChoice:c,choices:[]};
+ c.child=child.id;data.nodes.push(child);persist();
+}
+function jumpTo(id){
+ const el=[...document.querySelectorAll(".node")].find(e=>e.querySelector("h2")?.textContent===data.nodes.find(n=>n.id===id)?.question);
+ if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
+}
+function searchRoute(){
+ const target=document.getElementById("target").value,include=document.getElementById("uncertain").checked;
+ const out=document.getElementById("results");
+ if(!target){out.innerHTML="キャラクターを選択してね。";return}
+ const paths=[];
+ function walk(n,path){
+  n.choices.forEach(c=>{
+   const label=c.text||"（選択肢未入力）";
+   const step=n.question+" → "+label+"［蝶："+c.butterfly+"］";
+   const next=[...path,step];
+   if(c.character===target&&(c.outcome==="キャラクタールート"||(include&&c.outcome==="未確認"))){
+    paths.push({path:next,status:c.outcome});
+   }
+   if(c.child!==null){const child=data.nodes.find(x=>x.id===c.child);if(child)walk(child,next)}
+  });
+ }
+ data.nodes.filter(n=>n.parentChoice===null).forEach(n=>walk(n,[]));
+ out.innerHTML=paths.length?paths.map((p,i)=>'<div class="choice"><b>候補 '+(i+1)+'（'+esc(p.status)+'）</b><ol>'+p.path.map(s=>'<li>'+esc(s)+'</li>').join("")+'</ol></div>').join(""):'該当ルートはまだ登録されていないよ。選択肢の結果を確認して記録してね。';
+}
+function exportData(){
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="hakuoki-backup.json";a.click();URL.revokeObjectURL(a.href);
+}
+function importData(){
+ const f=document.getElementById("file").files[0];if(!f){alert("バックアップファイルを選んでね");return}
+ const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.chars)||!Array.isArray(d.nodes))throw Error();if(!confirm("今の記録を読み込んだ内容に置き換える？"))return;data=d;persist();alert("読み込みました")}catch(e){alert("このファイルは読み込めませんでした")}};r.readAsText(f);
+}
+render();
+</script>
+</body>
+</html>
